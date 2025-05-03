@@ -55,15 +55,20 @@ def main():
 
             response_content = ""
             rich.print(f"[bold green]{model}[/bold green]: ", end="", flush=True)
-            with client.messages.stream(
-                model=model,
-                max_tokens=max_tokens,
-                system=prompt,
-                messages=messages,
-            ) as stream:
-                for text in stream.text_stream:
-                    print(text, end="", flush=True)
-                    response_content += text
+
+            try:
+                with client.messages.stream(
+                    model=model,
+                    max_tokens=max_tokens,
+                    system=prompt,
+                    messages=messages,
+                ) as stream:
+                    for text in stream.text_stream:
+                        print(text, end="", flush=True)
+                        response_content += text
+            except Exception as e:
+                rich.print(f"[bold red]Error:[/bold red] {e}")
+                continue
 
             # for chunk in response:
             #    if isinstance(chunk, MessageStreamEvent):

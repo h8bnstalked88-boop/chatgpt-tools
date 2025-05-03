@@ -17,19 +17,34 @@ total_tokens_this_session = 0
 MODEL_CONTEXT = {
     # OpenAI
     "gpt-4.1": 1_047_576,
+    "openai/gpt-4.1": 1_047_576,
     "gpt-4.1-mini": 1_047_576,
+    "openai/gpt-4.1-mini": 1_047_576,
     "gpt-4.1-nano": 1_047_576,
+    "openai/gpt-4.1-nano": 1_047_576,
     "gpt-4o": 128_000,
+    "openai/gpt-4o": 128_000,
     "gpt-4-turbo": 128_000,
+    "openai/gpt-4-turbo": 128_000,
     "gpt-3.5-turbo": 16_000,
+    "openai/gpt-3.5-turbo": 16_000,
     # xAI
-    "grok-2-latest": 128_000,
+    "grok-2-latest": 131_072,
+    "x-ai/grok-2-latest": 131_072,
+    "grok-3-beta": 131_072,
+    "x-ai/grok-3-beta": 131_072,
+    "grok-3-mini-beta": 131_072,
+    "x-ai/grok-3-mini-beta": 131_072,
     # Deepseek
     "deepseek-chat": 128_000,
+    "deepseek/deepseek-chat": 128_000,
     # Google (conservative)
-    "gemini-1.5": 32_000,
+    "google/gemini-2.5-pro-preview-03-25": 1_000_000,
     # Local
     "llama3-8b": 8_000,
+    # claude
+    "anthropic/claude-3.5-sonnet": 200_000,
+    "anthropic/claude-3.7-sonnet": 200_000,
 }
 
 
@@ -59,11 +74,13 @@ def send_message(client, model, messages):
                 stream=True,
             )
             print()
-            print("-------------------")
-            print()
-            rich.print(f"[bold green]{model}[/bold green]: ", end="", flush=True)
+            markdown_hr = Markdown("--------------------")
+            rich.print(markdown_hr)
+            # print("-------------------")
+            # print()
+            rich.print(f"[bold green]{model}[/bold green]: ", end="\n", flush=True)
             content = ""
-            timeout_seconds = 120
+            timeout_seconds = 180
             timeout = timedelta(seconds=timeout_seconds)
             start_time = datetime.now()
             for chunk in stream:
@@ -73,11 +90,16 @@ def send_message(client, model, messages):
                     continue
                 delta = chunk.choices[0].delta  # Safe after empty check
                 if delta and delta.content:  # Validate delta exists
+                    # mkdown_content = Markdown(delta.content)
+                    # rich.print(mkdown_content, end="", flush=True)
                     print(delta.content, end="", flush=True)
                     content += delta.content
+            # mkdown_content = Markdown(content)
+            # rich.print(mkdown_content, end="\n", flush=True)
             print()
-            print("-------------------")
-            print()
+            markdown_hr = Markdown("--------------------")
+            rich.print(markdown_hr)
+            # print()
             t1 = datetime.now()
             tdiff = t1 - t0
             response_times.append(tdiff.total_seconds())
@@ -92,11 +114,18 @@ def send_message(client, model, messages):
                 sleep(1)
 
 
-def log_chat(provider, messages, chatlog_dir="chatlogs"):
+def log_chat(provider, model, messages, chatlog_dir="chatlogs"):
     os.makedirs(chatlog_dir, exist_ok=True)  # Create dir if it doesn't  exist
     index = 0
+    # when using openrouter, the model name will contain forward slashes
+    # example: "openrouter/llama3-8b"
+    # so we need to replace them with underscores
+    if provider == "openrouter":
+        model = model.replace("/", "_")
     while os.path.exists(
-        filename := os.path.join(chatlog_dir, f"chatlog-{provider}-{index}.json")
+        filename := os.path.join(
+            chatlog_dir, f"chatlog-{provider}-{model}-{index}.json"
+        )
     ):
         index += 1
     with open(filename, "w") as f:
@@ -194,7 +223,7 @@ def main_loop(provider, client, model, messages):
             # print_response(model, response_content)
         else:
             rich.print("[bold yellow]Warning[/bold yellow]: no response content")
-    log_chat(provider, messages)
+    log_chat(provider, model, messages)
 
 
 def estimate_token_count(messages: list) -> int:
@@ -252,10 +281,15 @@ def print_usage():
     print("Usage: python3 pa.py <provider> <model> <prompt_filepath>")
 
 
+# def check_usage():
+#    if len(sys.argv) != 4:
+#        print_usage()
+#        sys.exit(1)
 def check_usage():
-    if len(sys.argv) != 4:
+    if len(sys.argv) < 4:
         print_usage()
         sys.exit(1)
+    # We now allow 4 or 5 arguments (the 5th being optional)
 
 
 def print_avg_response_time():
@@ -288,6 +322,11 @@ def init_client(provider) -> OpenAI:
             api_key=os.getenv("GEMINI_API_KEY"),
             base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
         )
+    elif provider == "openrouter":
+        return OpenAI(
+            api_key=os.getenv("OPENROUTER_API_KEY"),
+            base_url="https://openrouter.ai/api/v1",
+        )
     # default to openai
     return OpenAI(
         api_key=os.getenv("OPENAI_API_KEY"),
@@ -295,23 +334,108 @@ def init_client(provider) -> OpenAI:
     )
 
 
+# def main():
+#    check_usage()
+#    provider = sys.argv[1]
+#    messages = []
+#    model = sys.argv[2]
+#    client = init_client(provider)
+#    prompt = initialize_prompt(sys.argv[3])
+#    messages = [create_chat_message("system", prompt)]
+#    try:
+#        main_loop(provider, client, model, messages)
+#    except KeyboardInterrupt:
+#        print("\nExiting...")
+#        log_chat(provider, model, messages)
+#    print_avg_response_time()
+
+
+def load_chat_from_file(filename: str) -> list:
+    """
+    Loads chat messages from a JSON file.
+
+    Args:
+        filename: Path to the JSON file containing chat messages
+
+    Returns:
+        A list of message dictionaries or empty list if file cannot be loaded
+    """
+    try:
+        with open(filename, "r") as f:
+            rich.print(
+                f"[bold purple]Info[/bold purple]: loading conversation from {filename}"
+            )
+            messages = json.load(f)
+            if not isinstance(messages, list):
+                rich.print(
+                    "[bold red]Error[/bold red]: Invalid conversation format in file"
+                )
+                return []
+
+            # Validate message format
+            for msg in messages:
+                if (
+                    not isinstance(msg, dict)
+                    or "role" not in msg
+                    or "content" not in msg
+                ):
+                    rich.print(
+                        "[bold red]Error[/bold red]: Invalid message format in conversation file"
+                    )
+                    return []
+
+            return messages
+    except FileNotFoundError:
+        rich.print(
+            f"[bold red]Error[/bold red]: Conversation file '{filename}' not found"
+        )
+        return []
+    except json.JSONDecodeError:
+        rich.print(
+            f"[bold red]Error[/bold red]: Invalid JSON in conversation file '{filename}'"
+        )
+        return []
+    except Exception as e:
+        rich.print(f"[bold red]Error[/bold red]: Failed to load conversation: {str(e)}")
+        return []
+
+
 def main():
     check_usage()
     provider = sys.argv[1]
-    messages = []
     model = sys.argv[2]
+    prompt_file = sys.argv[3]
+
+    # Check if a conversation file is provided
+    load_conversation = False
+    conversation_file = None
+    if len(sys.argv) >= 5:
+        conversation_file = sys.argv[4]
+        load_conversation = True
+
     client = init_client(provider)
-    prompt = initialize_prompt(sys.argv[3])
-    if provider != "google":
-        messages = [create_chat_message("system", prompt)]
+    prompt = initialize_prompt(prompt_file)
+
+    # Initialize messages
+    if load_conversation:
+        # CODE GOES HERE - Load messages from conversation file
+        # messages = []  # This will be replaced with loaded messages
+        messages = load_chat_from_file(conversation_file)
+        if not messages:  # If loading failed, fall back to default initialization
+            rich.print(
+                "[bold yellow]Warning[/bold yellow]: Failed to load conversation, starting fresh"
+            )
+            messages = [create_chat_message("system", prompt)]
+
     else:
-        # Google Gemini requires the prompt to be in the first message
-        messages = [create_chat_message("user", prompt)]
+        # Use standard initialization
+        messages = [create_chat_message("system", prompt)]
+
     try:
         main_loop(provider, client, model, messages)
     except KeyboardInterrupt:
         print("\nExiting...")
-        log_chat(provider, messages)
+        log_chat(provider, model, messages)
     print_avg_response_time()
 
 
